@@ -29,7 +29,9 @@ uint8_t USART3_TxBusy = 0;    //发送忙标志位，1:发送中，0:空闲
 
 uint8_t USART1_RXBuffer[1];          // 串口1单次中断接收缓冲区
 uint8_t USART1_TXBuffer[32];         // 串口1发送缓冲区
-uint8_t USART1_RxFrame[32];          // 串口1接收帧缓存
+uint8_t USART1_RxFrame[32];          // 串口1主循环工作副本（整帧交付后拷贝，供 Fly_Control 读）
+uint8_t USART1_RxBuild[FC_Rsp_Len];  // 串口1组帧缓存（仅中断内使用，逐字节组装）
+volatile uint8_t USART1_RxPkt[FC_Rsp_Len]; // 串口1整帧交付缓存（校验通过后一次性发布）
 uint8_t USART1_RxIdx    = 0;         // 串口1接收索引
 volatile uint8_t USART1_RxFinish = 0;// 串口1一帧接收完成标志
 uint32_t U1_last_tick = 0;           // 串口1计时标志
@@ -87,29 +89,27 @@ void FC_Packet_Make(FC_SendData *data)
     USART1_TXBuffer[0] = FC_Packet_Head1;
     USART1_TXBuffer[1] = FC_Packet_Head2;
 
-    USART1_TXBuffer[2] = data->Vbus12H;
-    USART1_TXBuffer[3] = data->Vbus12L;
+    USART1_TXBuffer[2] = data->vBtry28H;
+    USART1_TXBuffer[3] = data->vBtry28L;
                          
-    USART1_TXBuffer[4] = data->Vchn8H;  
-    USART1_TXBuffer[5] = data->Vchn8L; 
-                         
-    USART1_TXBuffer[6] = data->Ichn8H; 
-    USART1_TXBuffer[7] = data->Ichn8L; 
+    USART1_TXBuffer[4] = data->vBtry12H;  
+    USART1_TXBuffer[5] = data->vBtry12L; 
+    USART1_TXBuffer[6] = data->vBus28H; 
+    USART1_TXBuffer[7] = data->vBus28L; 
                           
-    USART1_TXBuffer[8] = data->Ichn7H; 
-    USART1_TXBuffer[9] = data->Ichn7L; 
-                          
-    USART1_TXBuffer[10] = data->Ichn6H; 
-    USART1_TXBuffer[11] = data->Ichn6L; 
+    USART1_TXBuffer[8] = data->vBus12H; 
+    USART1_TXBuffer[9] = data->vBus12L; 
+    USART1_TXBuffer[10] = data->iBtry28H; 
+    USART1_TXBuffer[11] = data->iBtry28L; 
 	                        
-    USART1_TXBuffer[12] = data->Ichn5H; 
-    USART1_TXBuffer[13] = data->Ichn5L; 
+    USART1_TXBuffer[12] = data->iBtry12H; 
+    USART1_TXBuffer[13] = data->iBtry12L; 
                           
-    USART1_TXBuffer[14] = data->Ep_collect_V_H; 
-    USART1_TXBuffer[15] = data->Ep_collect_V_L; 
+    USART1_TXBuffer[14] = data->iGerator1H; 
+    USART1_TXBuffer[15] = data->iGerator1L; 
 		
-    USART1_TXBuffer[16] = data->Ep_Current_H; 
-    USART1_TXBuffer[17] = data->Ep_Current_L; 
+    USART1_TXBuffer[16] = data->iGerator2H; 
+    USART1_TXBuffer[17] = data->iGerator2L; 
     USART1_TXBuffer[18] = Calc_CheckSum(USART1_TXBuffer, 18);
 //  	OLED_ShowHexNum(100,1,USART1_TXBuffer[18],2,OLED_8X16);
 //  	OLED_Update();
@@ -194,8 +194,8 @@ static void EP_Parse_12V(const uint8_t *buf)
     bat_12v.raw_current  = (int16_t)Byte2_TO_U16(buf[8], buf[9]);
     bat_12v.soc_raw      = Byte2_TO_U16(buf[10], buf[11]);
 
-    Read_data.Vchn8H = buf[4];   Read_data.Vchn8L = buf[5];   //12V 采集总压
-    Read_data.Ichn8H = buf[8];   Read_data.Ichn8L = buf[9];   //12V 电流
+    Read_data.vBtry12H = buf[4];   Read_data.vBtry12L = buf[5];   //12V 采集总压
+    Read_data.iBtry12H = buf[8];   Read_data.iBtry12L = buf[9];   //12V 电流
 
     Packet_Ready_flag = 1;      //方案a：任一电池应答成功即置位
 }
@@ -211,8 +211,8 @@ static void EP_Parse_28V(const uint8_t *buf)
     bat_28v.raw_current  = (int16_t)Byte2_TO_U16(buf[8], buf[9]);
     bat_28v.soc_raw      = Byte2_TO_U16(buf[10], buf[11]);
 
-    Read_data.Ep_collect_V_H = buf[4];  Read_data.Ep_collect_V_L = buf[5];
-    Read_data.Ep_Current_H   = buf[8];  Read_data.Ep_Current_L   = buf[9];
+    Read_data.vBtry28H = buf[4];  Read_data.vBtry28L = buf[5];
+    Read_data.iBtry28H   = buf[8];  Read_data.iBtry28L   = buf[9];
 
     Packet_Ready_flag = 1;
 }
@@ -388,28 +388,29 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 	if(huart->Instance == USART1)
 	{
         // 存入单字
-		USART1_RxFrame[USART1_RxIdx++] = USART1_RXBuffer[0];
+		USART1_RxBuild[USART1_RxIdx++] = USART1_RXBuffer[0];
         // 帧头0xEB 0x92，定长6字节
-        if(USART1_RxIdx == 1 && USART1_RxFrame[0] != FC_Packet_Head1)
+        if(USART1_RxIdx == 1 && USART1_RxBuild[0] != FC_Packet_Head1)
         {
             USART1_RxIdx = 0;
         }
         else if(USART1_RxIdx >= 2)
         {   
-            if(USART1_RxFrame[0]== FC_Packet_Head1 && USART1_RxFrame[1]== FC_Address)
+            if(USART1_RxBuild[0]== FC_Packet_Head1 && USART1_RxBuild[1]== FC_Address)
             {
                 if(USART1_RxIdx >= FC_Rsp_Len)
                 {
                     uint16_t sum = 0;
                     for(uint8_t i = 0; i < FC_Rsp_Len-1; i++)
                     {
-                        sum += USART1_RxFrame[i];
+                        sum += USART1_RxBuild[i];
                     }
                     uint8_t check = sum % 256;
 										/*OLED_ShowHexNum(100,1,check,2,OLED_8X16);
 										OLED_Update();*/
-                    if(check == USART1_RxFrame[5])
+                    if(check == USART1_RxBuild[5])
                     {
+                        for(uint8_t k = 0; k < FC_Rsp_Len; k++){ USART1_RxPkt[k] = USART1_RxBuild[k]; }
                         USART1_RxFinish = 1;
                     }
                     USART1_RxIdx = 0;

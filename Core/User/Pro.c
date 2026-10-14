@@ -7,13 +7,15 @@
 #include "LED.h"
 #include "SSPC.h"
 #include "Pro.h"
+#include "Serial_MSG.h"
 
 extern IWDG_HandleTypeDef hiwdg;
 KEY sky_gnd_key;
 /*锟斤拷锟斤拷模锟斤拷*/
 extern UART_HandleTypeDef huart1;
 extern uint8_t USART1_RxFrame[32];
-extern uint8_t USART1_RxFinish;
+extern volatile uint8_t USART1_RxFinish;
+extern volatile uint8_t USART1_RxPkt[FC_Rsp_Len];
 
 /*SSPC模锟斤拷*/
 extern FC_SendData Read_data; 
@@ -84,7 +86,10 @@ void Process(void)
 /*锟斤拷锟秸飞匡拷指锟斤拷*/
 		if(USART1_RxFinish == 1)
 			{
+				__disable_irq();
+				for(uint8_t k = 0; k < FC_Rsp_Len; k++){ USART1_RxFrame[k] = USART1_RxPkt[k]; }
 				USART1_RxFinish = 0;
+				__enable_irq();
 				Fly_Control();
 			}
 		  
@@ -110,20 +115,20 @@ void Process(void)
 void Fly_Control(void)
 {
 	uint8_t IO_Cmd1 = 0;
-	uint8_t IO_Cmd2 = 0;
-	if(USART1_RxFrame[2] == 0xFF){SSPC_Set();SSPC_Open_Key = 0;}
+	//uint8_t IO_Cmd2 = 0;
+	if(USART1_RxFrame[0] == FC_Packet_Head1 && USART1_RxFrame[1] == FC_Address && USART1_RxFrame[2] == 0xFF){SSPC_Set();SSPC_Open_Key = 0;}
 	if(USART1_RxFrame[3] == 0xFF && USART1_RxFrame[4] ==0x00)
 	{
 		Eng_Num_Flag = 1;
 		IO_Cmd1 = USART1_RxFrame[2];
 		FC_IO_CMD(IO_Cmd1,1);
 	}
-	if(USART1_RxFrame[3] == 0x00 && USART1_RxFrame[4] ==0xFF)
+	/*if(USART1_RxFrame[3] == 0x00 && USART1_RxFrame[4] ==0xFF)
 	{
 		Eng_Num_Flag = 0;
 		IO_Cmd2 = USART1_RxFrame[2];
 		FC_IO_CMD(IO_Cmd2,0);
-	}
+	}*/
 		
 }
 
@@ -164,7 +169,7 @@ void FC_IO_CMD(uint8_t cmd,uint8_t eng)
                 if(can.chn5 == 0)
                 {
 					can.chn5 = 1;
-					SSPC_SendCmd(SSPC_ID,SSPC_FUNC_CHN_OPEN,SSPC_CHN_5,0);
+					SSPC_SendCmd(SSPC_ID,SSPC_FUNC_CHN_OPEN,SSPC_CHN_5,0);HAL_Delay(SSPC_SendDelay);
 					SSPC_SendCmd(SSPC_ID,SSPC_FUNC_CHN_OPEN,SSPC_CHN_6,0);
 					LogChannelOp(CHN_6,SSPC_FUNC_CHN_OPEN,0);
 					LogChannelOp(CHN_5,SSPC_FUNC_CHN_OPEN,0);
@@ -173,7 +178,7 @@ void FC_IO_CMD(uint8_t cmd,uint8_t eng)
 			if(!(cmd&0x08)&&can.chn5 == 1)
 			{
 				can.chn5 = 0;
-				SSPC_SendCmd(SSPC_ID,SSPC_FUNC_CHN_CLOSE,SSPC_CHN_5,0);
+				SSPC_SendCmd(SSPC_ID,SSPC_FUNC_CHN_CLOSE,SSPC_CHN_5,0);HAL_Delay(SSPC_SendDelay);
 				SSPC_SendCmd(SSPC_ID,SSPC_FUNC_CHN_CLOSE,SSPC_CHN_6,0);
 				LogChannelOp(CHN_5,SSPC_FUNC_CHN_CLOSE,0);
 				LogChannelOp(CHN_6,SSPC_FUNC_CHN_CLOSE,0);
@@ -202,6 +207,7 @@ void FC_IO_CMD(uint8_t cmd,uint8_t eng)
 				}
 
 			}
+			/* ==== 实验(临时)：屏蔽发动机2 的通道5/6 控制，验证其是否参与循环 ====
 			if(cmd&0x08)
 			{
                 if(can.chn5 == 0)
@@ -221,6 +227,7 @@ void FC_IO_CMD(uint8_t cmd,uint8_t eng)
 				LogChannelOp(CHN_5,SSPC_FUNC_CHN_CLOSE,0);
 				LogChannelOp(CHN_6,SSPC_FUNC_CHN_CLOSE,0);
 			}
+			   ==== 实验(临时)结束，恢复时删除本注释对 ==== */
 		break;		
 		default:
 			switch(cmd)
@@ -527,17 +534,17 @@ SSPC_CHN_Read(uint32_t now,FC_SendData* readdata,uint8_t data[8])
 	switch(data[3])
 	{
 		case SSPC_CHN_1:   break;
-		case SSPC_CHN_5:  if(data[2] == SSPC_STAT_REPORT_VOUT_I){readdata->Ichn5H = data[6];readdata->Ichn5L = data[7];}  break;
-		case SSPC_CHN_6:  if(data[2] == SSPC_STAT_REPORT_VOUT_I){readdata->Ichn6H = data[6];readdata->Ichn6L = data[7];}  break;
+	//	case SSPC_CHN_5:  if(data[2] == SSPC_STAT_REPORT_VOUT_I){readdata->Ichn5H = data[6];readdata->Ichn5L = data[7];}  break;
+	//	case SSPC_CHN_6:  if(data[2] == SSPC_STAT_REPORT_VOUT_I){readdata->Ichn6H = data[6];readdata->Ichn6L = data[7];}  break;
 	//case SSPC_CHN_7:   readdata->Ichn7H = data[6];readdata->Ichn7L = data[7];  break;
-		case SSPC_CHN_8:   readdata->Ichn8H = data[6];readdata->Ichn8L = data[7]; break;
-		case SSPC_CHN_5_8: readdata->Vchn8H = data[4];readdata->Vchn8L = data[5];
+	//	case SSPC_CHN_8:   readdata->Ichn8H = data[6];readdata->Ichn8L = data[7]; break;
+		case SSPC_CHN_5_8: readdata->vBus28H = data[4];readdata->vBus28L = data[5];
 							//Vcheck_28Vbus(now,data[4],data[5]);
 							if (Byte2_TO_U16(data[4],data[5]) > 0x2710)
 							{P2_UNLOCK_V = 1;}
 							else{P2_UNLOCK_V = 0;}
 							break;
-		case SSPC_CHN_1_4 : readdata->Vbus12H = data[4];readdata->Vbus12L = data[5];
+		case SSPC_CHN_1_4 : readdata->vBus12H = data[4];readdata->vBus12L = data[5];
 							if(Byte2_TO_U16(data[4],data[5]) > 0x2710){P1_UNLOCK_V = 1;}
 							else{P1_UNLOCK_V = 0;}
 							break;

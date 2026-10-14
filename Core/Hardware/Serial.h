@@ -2,23 +2,22 @@
 #define __Serial_H
 
 typedef struct{
-	uint16_t Vbus12H;
-	uint16_t Vchn8H;
-	uint16_t Ichn8H;
-	uint16_t Ichn7H;
-	uint16_t Ichn6H;
-	uint16_t Ichn5H;
-	
-	uint16_t Vbus12L;
-	uint16_t Vchn8L;
-	uint16_t Ichn8L;
-	uint16_t Ichn7L;
-	uint16_t Ichn6L;
-	uint16_t Ichn5L;
-	uint16_t Ep_collect_V_H;
-	uint16_t Ep_collect_V_L;
-	uint16_t Ep_Current_H;
-	uint16_t Ep_Current_L;
+	uint16_t vBtry28H;
+	uint16_t vBtry28L;
+	uint16_t vBtry12H;
+	uint16_t vBtry12L;
+	uint16_t vBus28H;
+	uint16_t vBus28L;
+	uint16_t vBus12H;
+	uint16_t vBus12L;
+	uint16_t iBtry28H;
+	uint16_t iBtry28L;
+	uint16_t iBtry12H;
+	uint16_t iBtry12L;
+	uint16_t iGerator1H;
+	uint16_t iGerator1L;
+	uint16_t iGerator2H;
+	uint16_t iGerator2L;
 }FC_SendData;
 
 typedef struct{
