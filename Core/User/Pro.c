@@ -16,6 +16,7 @@ extern UART_HandleTypeDef huart1;
 extern uint8_t USART1_RxFrame[32];
 extern volatile uint8_t USART1_RxFinish;
 extern volatile uint8_t USART1_RxPkt[FC_Rsp_Len];
+extern uint32_t Bus_last_tick;  //母线数据新鲜度时间戳（Serial.c定义，SSPC_CHN_Read内刷新）
 
 /*SSPC模锟斤拷*/
 extern FC_SendData Read_data; 
@@ -528,8 +529,7 @@ void SSPC_CHN_Unlock(uint32_t now,uint8_t *data)
  * @brief  SSPC锟斤拷取锟斤拷锟斤拷
  * @retval 
  */
-void 
-SSPC_CHN_Read(uint32_t now,FC_SendData* readdata,uint8_t data[8])
+void SSPC_CHN_Read(uint32_t now,FC_SendData* readdata,uint8_t data[8])
 {
 	switch(data[3])
 	{
@@ -539,12 +539,14 @@ SSPC_CHN_Read(uint32_t now,FC_SendData* readdata,uint8_t data[8])
 	//case SSPC_CHN_7:   readdata->Ichn7H = data[6];readdata->Ichn7L = data[7];  break;
 	//	case SSPC_CHN_8:   readdata->Ichn8H = data[6];readdata->Ichn8L = data[7]; break;
 		case SSPC_CHN_5_8: readdata->vBus28H = data[4];readdata->vBus28L = data[5];
+							Bus_last_tick = now;   //母线数据已更新，刷新新鲜度时间戳
 							//Vcheck_28Vbus(now,data[4],data[5]);
 							if (Byte2_TO_U16(data[4],data[5]) > 0x2710)
 							{P2_UNLOCK_V = 1;}
 							else{P2_UNLOCK_V = 0;}
 							break;
 		case SSPC_CHN_1_4 : readdata->vBus12H = data[4];readdata->vBus12L = data[5];
+							Bus_last_tick = now;   //母线数据已更新，刷新新鲜度时间戳
 							if(Byte2_TO_U16(data[4],data[5]) > 0x2710){P1_UNLOCK_V = 1;}
 							else{P1_UNLOCK_V = 0;}
 							break;

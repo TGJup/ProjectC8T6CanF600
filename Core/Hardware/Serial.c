@@ -23,9 +23,15 @@ EP_DataTypeDef bat_12v;             // 12V 电池解包数据（RS485）
 EP_DataTypeDef bat_28v;             // 28V 电池解包数据（RS485）
 
 static  uint8_t MCU_PowerOn_Flag = 0;
-static  uint8_t Packet_Ready_flag;
 uint8_t USART1_TxBusy = 0;    //发送忙标志位，1:发送中，0:空闲
 uint8_t USART3_TxBusy = 0;    //发送忙标志位，1:发送中，0:空闲
+
+// 数据新鲜度：发送前判断哪一路采集已断链，断链的那一路用降级值（无效值）发出
+#define FC_BAT_TIMEOUT   500U    //电池(RS485)数据超时(ms)：轮询周期 80ms，取 6 倍余量
+#define FC_BUS_TIMEOUT   5000U   //母线(SSPC)数据超时(ms)：SSPC 上报周期约 2s，取 2.5 倍余量
+uint32_t Bat12_last_tick = 0;    //12V 电池数据最后更新时刻（EP_Parse_12V 内刷新）
+uint32_t Bat28_last_tick = 0;    //28V 电池数据最后更新时刻（EP_Parse_28V 内刷新）
+uint32_t Bus_last_tick = 0;      //母线数据最后更新时刻（SSPC_CHN_Read 内刷新）
 
 uint8_t USART1_RXBuffer[1];          // 串口1单次中断接收缓冲区
 uint8_t USART1_TXBuffer[32];         // 串口1发送缓冲区
@@ -67,7 +73,13 @@ uint8_t UART_SendData(UART_HandleTypeDef *huart, uint8_t *pData, uint16_t len)
 	  	 if(USART3_TxBusy) return 1;
        USART3_TxBusy = 1;
 	  }
-    HAL_UART_Transmit_IT(huart, pData, len);
+    if(HAL_UART_Transmit_IT(huart, pData, len) != HAL_OK)
+    {
+        // 启动失败(HAL_BUSY/HAL_ERROR)：回滚忙标志，避免发送永久静默、无法自恢复
+        if(huart->Instance == USART1)      USART1_TxBusy = 0;
+        else if(huart->Instance == USART3) USART3_TxBusy = 0;
+        return 1;
+    }
 		return 0 ;
 }
 
@@ -197,7 +209,7 @@ static void EP_Parse_12V(const uint8_t *buf)
     Read_data.vBtry12H = buf[4];   Read_data.vBtry12L = buf[5];   //12V 采集总压
     Read_data.iBtry12H = buf[8];   Read_data.iBtry12L = buf[9];   //12V 电流
 
-    Packet_Ready_flag = 1;      //方案a：任一电池应答成功即置位
+    Bat12_last_tick = HAL_GetTick();   //12V 电池数据已更新，刷新新鲜度时间戳
 }
 
 /**
@@ -214,7 +226,7 @@ static void EP_Parse_28V(const uint8_t *buf)
     Read_data.vBtry28H = buf[4];  Read_data.vBtry28L = buf[5];
     Read_data.iBtry28H   = buf[8];  Read_data.iBtry28L   = buf[9];
 
-    Packet_Ready_flag = 1;
+    Bat28_last_tick = HAL_GetTick();
 }
 
 /**
@@ -310,15 +322,36 @@ void USART1_LoopCall(void)
             }
         }
     }
-    // 阶段2：3秒过后，发送正常采集数据
+    // 阶段2：3秒过后，80ms 固定周期发送（发最近一次采集值；断链的那一路用降级值）
     else
     {
-        
-        if(tick_diff >= FC_Send_Cycle && Packet_Ready_flag == 1)
+        if(tick_diff >= FC_Send_Cycle)
         {
-            Packet_Ready_flag = 0;
+            static FC_SendData tx;      //本次发送快照（不动 Read_data 本体）
+
+            tx = Read_data;
+
+            // 12V 电池(RS485)断链：电压发 0，电流发 30000(=0.0A，协议为 30000 offset)
+            if(tick_now - Bat12_last_tick > FC_BAT_TIMEOUT)
+            {
+                tx.vBtry12H = 0; tx.vBtry12L = 0;
+                tx.iBtry12H = 0x75; tx.iBtry12L = 0x30;
+            }
+            // 28V 电池(RS485)断链：电压发 0，电流发 30000(=0.0A，协议为 30000 offset)
+            if(tick_now - Bat28_last_tick > FC_BAT_TIMEOUT)
+            {
+                tx.vBtry28H = 0; tx.vBtry28L = 0;
+                tx.iBtry28H = 0x75; tx.iBtry28L = 0x30;
+            }
+            // 母线(SSPC)断链：母线电压发 0
+            if(tick_now - Bus_last_tick > FC_BUS_TIMEOUT)
+            {
+                tx.vBus28H = 0; tx.vBus28L = 0;
+                tx.vBus12H = 0; tx.vBus12L = 0;
+            }
+
             U1_last_tick = tick_now;
-            FC_Packet_Make(&Read_data); 
+            FC_Packet_Make(&tx);
         }
     }
 }
