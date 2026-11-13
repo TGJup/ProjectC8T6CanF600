@@ -24,7 +24,9 @@
 /* Dual batteries on RS485 bus: query address + per-battery slot */
 #define EP_12V_REQ_ADDR      0x40
 #define EP_28V_REQ_ADDR      0x41
-#define EP_Slot_MS           40
+#define EP_Slot_MS           300
+/* Frame gap silence: 3.5 char times (3.65ms @9600), take 5ms */
+#define EP_Rx_Gap_MS         5
 
 #define EP_GET_UI            0U
 #define EP_GET_STATUS        1U

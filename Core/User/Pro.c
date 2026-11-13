@@ -116,7 +116,7 @@ void Process(void)
 void Fly_Control(void)
 {
 	uint8_t IO_Cmd1 = 0;
-	//uint8_t IO_Cmd2 = 0;
+	uint8_t IO_Cmd2 = 0;
 	if(USART1_RxFrame[0] == FC_Packet_Head1 && USART1_RxFrame[1] == FC_Address && USART1_RxFrame[2] == 0xFF){SSPC_Set();SSPC_Open_Key = 0;}
 	if(USART1_RxFrame[3] == 0xFF && USART1_RxFrame[4] ==0x00)
 	{
@@ -124,12 +124,12 @@ void Fly_Control(void)
 		IO_Cmd1 = USART1_RxFrame[2];
 		FC_IO_CMD(IO_Cmd1,1);
 	}
-	/*if(USART1_RxFrame[3] == 0x00 && USART1_RxFrame[4] ==0xFF)
+	if(USART1_RxFrame[3] == 0x00 && USART1_RxFrame[4] ==0xFF)
 	{
 		Eng_Num_Flag = 0;
 		IO_Cmd2 = USART1_RxFrame[2];
 		FC_IO_CMD(IO_Cmd2,0);
-	}*/
+	}
 		
 }
 
